@@ -610,6 +610,8 @@ messages
 - 理解真实 provider 和统一抽象之间的映射关系。
 - 理解 `Context` 如何落地到 provider payload。
 - 初步掌握 API key 管理。
+- provider response 如何转换回 AssistantMessage                       
+- 为什么 Model.base_url / provider / api 有意义 
 
 ### 对应阅读源码
 
