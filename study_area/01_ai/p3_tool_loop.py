@@ -11,6 +11,12 @@
 
 模拟的逻辑:
     每一次 AssistantMessage 的生成, 真实场景是 model + context + options 输入 provider, 得到 AssistantMessage
+
+扩展项: 
+    - 工具参数校验强化
+    - 校验失败/执行失败如何转成 ToolResultMessage
+
+    源码参考: validation.ts, validation.test.ts
 """
 
 from dataclasses import asdict
