@@ -258,6 +258,9 @@ class ToolCall:
 
 说明:
     Message = UserMessage | AssistantMessage | ToolResultMessage
+
+消息对象类型标识:
+    "role" 字段: "user" | "assistant" | "toolResult"
 """
 from dataclasses import field
 
@@ -300,6 +303,18 @@ class AssistantMessage:
     response_id: str | None = None # 略
     error_message: str | None = None # 略
     diagnostics: list[Any] | None = None # 略
+
+@dataclass
+class ToolResultMessage:
+    role: Literal["toolResult"]
+    tool_call_id: str
+    tool_name: str
+    content: list[TextContent | ImageContent]
+    is_error: bool
+    timestamp: int
+    details: Any | None = None
+
+Message = UserMessage | AssistantMessage | ToolResultMessage
 
 """  3. 停止原因和用量  """
 """
