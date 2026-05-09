@@ -1,4 +1,4 @@
-"""  总览  """
+"""  总览: 静态核心类型  """
 """
 Phase 1: packages/ai/src/types.ts 类型提纲
 
