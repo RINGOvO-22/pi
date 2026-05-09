@@ -324,6 +324,9 @@ Message = UserMessage | AssistantMessage | ToolResultMessage
 说明:
     StopReason 描述 assistant 为什么停止。
     Usage 描述 token / cost 使用情况。
+
+被使用的位置:
+    均为 AssistantMessage 中的字段值
 """
 
 """  4. 上下文  """
