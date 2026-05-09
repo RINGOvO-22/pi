@@ -502,29 +502,49 @@ study_area/01_ai/python_practice/phase_02_fake_stream.py
 assistant toolCall → 本地执行工具 → 追加 toolResult → 再次调用模型
 ```
 
+工具场景改为:
+
+```text
+让模型请求读取当前项目的文件 tree, 然后基于 tree 和学习目录推测当前学习进度。
+```
+
 ### 简述内容
 
 实现一个本地工具:
 
 ```text
-get_time(timezone: str = "UTC")
+list_project_tree(root: str = ".", max_depth: int = 3)
+```
+
+工具返回当前项目的目录结构, 可重点包含:
+
+```text
+study_area/
+learning/
+packages/ai/src/
+packages/agent/src/
 ```
 
 然后写一个最小循环:
 
 1. 构造 `Context`。
-2. 调用 fake model。
-3. 检查 assistant message 中是否包含 `toolCall`。
-4. 执行 `get_time`。
-5. 将结果作为 `toolResult` 追加到 `context.messages`。
-6. 再调用 fake model, 输出最终回答。
+2. 调用 fake model, 让它产生 `list_project_tree` 的 `ToolCall`。
+3. 检查 assistant message 中是否包含 `ToolCall`。
+4. 执行 `list_project_tree`。
+5. 将文件 tree 作为 `ToolResultMessage` 追加到 `context.messages`。
+6. 再调用 fake model, 输出对当前学习进度的推测。
 
 ### 能学到的技能
 
 - 理解 tool calling 的完整闭环。
 - 理解 `toolCallId` 的作用。
-- 理解 `toolResult` 为什么也是一种 message。
+- 理解 `ToolResultMessage` 为什么也是一种 message。
+- 理解工具结果如何把外部环境信息注入上下文。
 - 理解 `packages/ai` 和 `packages/agent` 的边界: `ai` 提供结构, `agent` 自动化循环。
+
+说明:
+
+Phase 3 仍然可以先用 fake model, 重点是练习 tool loop。真实 Qwen 根据文件 tree 推测学习进度, 可以放到 Phase 6 的真实 tool calling 中实现。
 
 ### 对应阅读源码
 
@@ -690,27 +710,30 @@ study_area/01_ai/python_practice/phase_05_qwen_stream.py
 实现一个工具:
 
 ```text
-get_time(timezone?: string)
+list_project_tree(root?: string, max_depth?: number)
 ```
+
+工具读取当前项目目录结构。用户让模型判断当前学习进度, 模型应主动调用该工具获取项目 tree, 再基于工具结果给出判断。
 
 向 Qwen 请求时传入 tools/function schema, 让模型决定是否调用工具。
 
 流程:
 
-1. 用户问: `现在上海几点?`
-2. 请求中带上 `get_time` 工具定义。
+1. 用户问: `请根据当前项目文件结构, 判断我在 agent 应用开发学习计划中进展到哪里了。`
+2. 请求中带上 `list_project_tree` 工具定义。
 3. Qwen 返回 tool call。
-4. Python 校验参数。
-5. Python 执行 `get_time`。
-6. 将 tool result 作为消息追加。
+4. Python 校验参数, 限制 root / max_depth, 避免读取过大范围。
+5. Python 执行 `list_project_tree`。
+6. 将文件 tree 作为 tool result 追加到 messages。
 7. 再次请求 Qwen。
-8. 得到自然语言最终回答。
+8. 得到模型对当前学习进度的判断和下一步建议。
 
 ### 能学到的技能
 
 - 理解真实 tool calling payload。
 - 理解工具 schema 如何影响模型行为。
-- 理解参数校验的重要性。
+- 理解参数校验和工具权限边界的重要性。
+- 理解工具结果如何把本地环境信息注入模型上下文。
 - 理解 Agent Loop 的最小闭环。
 
 ### 对应阅读源码
