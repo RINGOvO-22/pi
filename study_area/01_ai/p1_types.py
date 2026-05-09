@@ -329,6 +329,8 @@ Message = UserMessage | AssistantMessage | ToolResultMessage
     均为 AssistantMessage 中的字段值
 """
 
+# 在 section 2 中作为依赖类已定义.
+
 """  4. 上下文  """
 """
 对应源码中的类型:
@@ -337,6 +339,18 @@ Message = UserMessage | AssistantMessage | ToolResultMessage
 说明:
     Context = systemPrompt + messages + tools
 """
+
+@dataclass
+class Tool:
+    name: str
+    description: str
+    parameters: dict[str, Any] # 简化版. 本质上是工具参数schema
+
+@dataclass
+class Context:
+    messages: list[Message] = field(default_factory=list)
+    system_prompt: str | None = None
+    tools: list[Tool] = field(default_factory=list)
 
 """  5. 工具关系  """
 """
@@ -349,8 +363,10 @@ Message = UserMessage | AssistantMessage | ToolResultMessage
     ToolResultMessage 是程序执行工具后的结果。
 
 关键关联字段:
-    ToolCall.id <-> ToolResultMessage.toolCallId
+    ToolCall.id <-> ToolResultMessage.tool_call_id
 """
+
+# 已于 section 1, 2, 4 完成定义. 该 section 是为了关系串联及梳理.
 
 """  6. 模型  """
 """
@@ -359,4 +375,144 @@ Message = UserMessage | AssistantMessage | ToolResultMessage
 
 说明:
     Model 描述一个具体可调用的模型, 包括 id、provider、api、baseUrl、contextWindow、maxTokens、input、reasoning、cost 等。
+
+重点:
+    provider 不是 api。
+    例如 Qwen 可以是 provider="qwen", api="openai-completions"。
 """
+
+@dataclass
+class ModelCost:
+    input: float = 0 # $/million tokens
+    output: float = 0 # $/million tokens
+    cache_read: float = 0 # $/million tokens
+    cache_write: float = 0 # $/million tokens
+
+@dataclass
+class Model:
+    # 模型身份
+    id: str
+    name: str
+    provider: str
+    api: str # 使用哪种 API 协议
+    base_url: str
+
+    # 能力描述
+    reasoning: bool = False
+    input: list[Literal["text", "image"]] = field(default_factory=lambda: ["text"])
+    thinking_level_map: dict[str, str | None] | None = None # Pi thinking level 到 provider 参数的映射. 简化版.
+
+    # 成本与上下文
+    cost: ModelCost = field(default_factory=ModelCost) # 每百万 token 的价格
+    context_window: int = 0
+    max_tokens: int = 0
+
+    # 高级字段. Phase 1 暂时略.
+    headers: dict[str, str] | None = None
+    compat: Any | None = None
+
+
+if __name__ == "__main__":
+    """
+    示例链路:
+        UserMessage
+            -> AssistantMessage(ToolCall)
+            -> ToolResultMessage
+            -> AssistantMessage(TextContent)
+
+    含义:
+        1. 用户询问上海时间。
+        2. 模型请求调用 get_time 工具。
+        3. 程序执行工具, 将结果作为 ToolResultMessage 回填。
+        4. 模型基于工具结果生成最终自然语言回答。
+
+    Context 结构:
+        Context
+        ├── system_prompt
+        ├── tools
+        │   └── Tool(name="get_time")
+        └── messages
+            ├── UserMessage(role="user")
+            ├── AssistantMessage(role="assistant")
+            │   └── content
+            │       └── ToolCall(id="call_1", name="get_time")
+            ├── ToolResultMessage(role="toolResult", tool_call_id="call_1")
+            └── AssistantMessage(role="assistant")
+                └── content
+                    └── TextContent(type="text")
+    """
+    import json
+    from dataclasses import asdict
+
+    # 初始 context: 用户消息 + 工具列表 + system_prompt (optional)
+    context = Context(
+        messages=[
+            UserMessage(
+                role="user",
+                content="现在上海几点?",
+                timestamp=0,
+            )
+        ],
+        tools=[
+            Tool(
+                name="get_time",
+                description="Get current time",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "timezone": {"type": "string"},
+                    },
+                },
+            )
+        ],
+    )
+
+    # 大模型会初步生成 ToolCall
+    tool_call = ToolCall(
+        type="toolCall",
+        id="call_1",
+        name="get_time",
+        arguments={"timezone": "Asia/Shanghai"},
+    )
+
+    # 包含 ToolCall 的完整 AssistantMessage
+    assistant = AssistantMessage(
+        role="assistant",
+        content=[tool_call],
+        usage=Usage(),
+        stop_reason="toolUse",
+        timestamp=0,
+    )
+
+    # 将大模型消息记录到 context
+    context.messages.append(assistant)
+
+    # 模拟工具返回值, 并记录到 context
+    context.messages.append(
+        ToolResultMessage(
+            role="toolResult",
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            content=[TextContent(type="text", text="2026-05-09 12:00:00")],
+            is_error=False,
+            timestamp=0,
+        )
+    )
+
+    # 模拟大模型根据工具返回值生成的最终回复, 并记录到 context
+    context.messages.append(
+        AssistantMessage(
+            role="assistant",
+            content=[
+                TextContent(
+                    type="text",
+                    text="现在上海时间是 2026-05-09 12:00:00。",
+                )
+            ],
+            usage=Usage(),
+            stop_reason="stop",
+            timestamp=0,
+        )
+    )
+
+    print(json.dumps({"Context": asdict(context)}, indent=2, ensure_ascii=False))
