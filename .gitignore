@@ -3,6 +3,9 @@ dist/
 *.log
 .DS_Store
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
+Miniforge3-Linux-x86_64.sh
 # packages/*/node_modules/
 packages/*/dist/
 packages/*/dist-chrome/

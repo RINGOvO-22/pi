@@ -194,19 +194,25 @@ if __name__ == "__main__":
     import json
     from dataclasses import asdict
 
+    print("="*60)
     api_key = get_qwen_api_key()
     print("QWEN_API_KEY loaded")
 
+    print("="*60)
     context = create_context()
     print(json.dumps({"Context": asdict(context)}, indent=2, ensure_ascii=False))
 
+    print("="*60)
     openai_messages = context_to_openai_messages(context)
     print(json.dumps({"OpenAIMessages": openai_messages}, indent=2, ensure_ascii=False))
 
+    print("="*60)
     assistant_text, usage = call_qwen_complete(api_key, openai_messages)
     print(json.dumps({"QwenAssistantText": assistant_text}, indent=2, ensure_ascii=False))
     print(json.dumps({"QwenUsage": asdict(usage)}, indent=2, ensure_ascii=False))
     
+    print("="*60)
     assistant_message = create_assistant_message_from_text(assistant_text, usage)
     context.messages.append(assistant_message)
     print(json.dumps({"ContextAfterAssistant": asdict(context)}, indent=2, ensure_ascii=False))
+    print("="*60)

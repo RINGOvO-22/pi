@@ -196,26 +196,28 @@ def call_qwen_stream(api_key: str, messages: list[dict[str, str]]) -> Iterator[d
         if not delta:
             continue
         
-        # 4. 第一次拿到文本时, 发 text_start
+        # 4. 第一次拿到文本前, 先发 text_start
         if not text_started:
             partial_message.content.append(TextContent(type="text", text=""))
             text_started = True
             yield {
                 "type": "text_start",
-                "content_index": 0,
+                "content_index": 0, # 当前只处理文本, 暂不管 thinking/toolcall.
                 "partial": partial_message,
             }
 
+        # 5. 每收到一小段文本，发 text_delta
         text_so_far += delta
         partial_message.content[0] = TextContent(type="text", text=text_so_far)
 
         yield {
             "type": "text_delta",
             "content_index": 0,
-            "delta": delta,
-            "partial": partial_message,
+            "delta": delta, # 本次新增的文本片段
+            "partial": partial_message, # 截至目前完整的 assistant message 状态
         }
 
+    # 6. 流结束后发 text_end
     if text_started:
         yield {
             "type": "text_end",
@@ -235,6 +237,7 @@ def call_qwen_stream(api_key: str, messages: list[dict[str, str]]) -> Iterator[d
         model="qwen-plus",
     )
 
+    # 7. 最后, 发 done, 生成最后的 AssistantMessage
     yield {
         "type": "done",
         "reason": "stop",
@@ -242,57 +245,83 @@ def call_qwen_stream(api_key: str, messages: list[dict[str, str]]) -> Iterator[d
     }
 
 
-"""  5. 解析 response 并构造 AssistantMessage  """
+"""  5. 消费 stream events, 拿到最终 AssistantMessage  """
 """
-Step 4 得到的是 provider 返回的 assistant 文本和 usage。
+Step 4 得到的不是一个完整 response, 而是一串 stream event。
 
-这里把它们包装回 Phase 1 定义的 AssistantMessage:
-    assistant text
-        -> TextContent
-        -> AssistantMessage.content
+这里要做的是:
+    events
+        -> 逐个消费 / 展示
+        -> 从 done event 中取出最终 AssistantMessage
 
-    provider usage
-        -> Usage
-        -> AssistantMessage.usage
+这一步对应上层调用方消费 provider stream 的过程。
 
-这一步对应 packages/ai 中 provider response 到统一 AssistantMessage 的转换。
+注意:
+    - text_delta 适合实时打印到终端 / UI
+    - done.message 才是最终可以 append 到 context.messages 的 AssistantMessage
 """
 
-def create_assistant_message_from_text(text: str, usage: Usage) -> AssistantMessage:
-    return AssistantMessage(
-        role="assistant",
-        content=[TextContent(type="text", text=text)],
-        usage=usage,
-        stop_reason="stop",
-        timestamp=now_ms(),
-        api="openai-completions",
-        provider="qwen",
-        model="qwen-plus",
-    )
+def consume_qwen_stream(events: Iterator[dict]) -> AssistantMessage:
+    final_message: AssistantMessage | None = None
+
+    for event in events:
+        event_type = event["type"]
+
+        if event_type == "text_delta":
+            print(event["delta"], flush=True) # 打印每个 chrunk 的新增文本段
+            # flash: 默认情况下，终端输出可能会被 Python 暂存一下，不一定马上显示。
+
+        elif event_type == "done":
+            final_message = event["message"] # 获取最终的 AssistantMessage, 作为返回
+
+    print()
+
+    if final_message is None:
+        raise RuntimeError("Qwen stream ended without done event")
+
+    return final_message
 
 """  6. Context 更新  """
 """
-将得到的 AssistantMessage append 到 context 的 messages 中
-略
+将 done.message append 到 context.messages 中。
+
+P4:
+    assistant_text, usage = call_qwen_complete(...)
+    assistant_message = create_assistant_message_from_text(assistant_text, usage)
+    context.messages.append(assistant_message)
+
+P5:
+    events = call_qwen_stream(...)
+    assistant_message = consume_qwen_stream(events)
+    context.messages.append(assistant_message)
 """
 
 if __name__ == "__main__":
     import json
     from dataclasses import asdict
 
+    print("="*60)
     api_key = get_qwen_api_key()
     print("QWEN_API_KEY loaded")
 
+    print("="*60)
     context = create_context()
     print(json.dumps({"Context": asdict(context)}, indent=2, ensure_ascii=False))
 
+    print("="*60)
     openai_messages = context_to_openai_messages(context)
     print(json.dumps({"OpenAIMessages": openai_messages}, indent=2, ensure_ascii=False))
 
-    assistant_text, usage = call_qwen_complete(api_key, openai_messages)
-    print(json.dumps({"QwenAssistantText": assistant_text}, indent=2, ensure_ascii=False))
-    print(json.dumps({"QwenUsage": asdict(usage)}, indent=2, ensure_ascii=False))
-    
-    assistant_message = create_assistant_message_from_text(assistant_text, usage)
+    print("="*60)
+    print("Qwen stream output:")
+    events = call_qwen_stream(api_key, openai_messages)
+    assistant_message = consume_qwen_stream(events)
+
+    print("="*60)
+    # API 对应的请求格式下的发给模型的消息
+    print(json.dumps({"QwenAssistantMessage": asdict(assistant_message)}, indent=2, ensure_ascii=False))
+
+    print("="*60)
     context.messages.append(assistant_message)
     print(json.dumps({"ContextAfterAssistant": asdict(context)}, indent=2, ensure_ascii=False))
+    print("="*60)
