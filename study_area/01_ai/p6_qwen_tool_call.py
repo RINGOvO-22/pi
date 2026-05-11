@@ -69,7 +69,7 @@ Tool 定义需要同时存在两份表示:
         2. https://help.aliyun.com/zh/model-studio/qwen-function-calling
         3. https://json-schema.org/understanding-json-schema/reference/object
 """
-from p1_types import AssistantMessage, Context, TextContent, UserMessage, Tool
+from p1_types import AssistantMessage, Context, TextContent, Usage, UserMessage, Tool
 import time
 
 def now_ms() -> int:
@@ -91,8 +91,8 @@ def create_tool() -> Tool:
                 },
                 "max_depth": {
                     "type": "integer",
-                    "description": "要列出的最大目录深度。默认使用 3。",
-                    "minimum": 1,
+                    "description": "从当前脚本所在目录开始向上回退的层数, 然后列出该目录下的文件树。默认使用 3。",
+                    "minimum": 0,
                     "maximum": 5,
                 },
             },
@@ -118,7 +118,7 @@ def create_context() -> Context:
         ]
     )
 
-"""  3. Context / Tool 转 OpenAI-compatible payload  """
+"""  3. Context / tools 转 OpenAI-compatible payload  """
 """
 这是 P4 context_to_openai_messages 的扩展版。
 
@@ -198,6 +198,7 @@ def context_to_openai_messages(context: Context) -> list[dict[str, object]]:
             messages.append(assistant_payload)
             
         # 4. 处理 ToolResultMessage
+        # 可以先不看, 到 section 7 的时候在回来看.
         elif isinstance(message, ToolResultMessage):
             content = "\n".join(
                 block.text for block in message.content if isinstance(block, TextContent)
@@ -281,6 +282,43 @@ def call_qwen_for_tool_call(
 阅读重点:
     - provider tool_call 如何规范化成统一 ToolCall
 """
+def parse_provider_tool_call(provider_tool_call) -> ToolCall:
+    try:
+        # 根据 qwen (OpenAI compatible) 返回的 tool call 格式, 取出 arguments
+        arguments = json.loads(provider_tool_call.function.arguments or "{}")
+    except json.JSONDecodeError:
+        arguments = {}
+    
+    return ToolCall(
+        type="toolCall",
+        id=provider_tool_call.id,
+        name=provider_tool_call.function.name,
+        arguments=arguments,
+    )
+
+def parse_provider_tool_call_list(provider_tool_call_list) -> list[ToolCall]:
+    if not provider_tool_call_list:
+        return []
+    
+    return [
+        parse_provider_tool_call(provider_tool_call)
+        for provider_tool_call in provider_tool_call_list
+    ]
+
+
+def create_assistant_message_from_tool_calls(tool_calls: list[ToolCall]) -> AssistantMessage:
+    return AssistantMessage(
+        role="assistant",
+        content=tool_calls,
+        usage=Usage(),
+        stop_reason="toolUse",
+        timestamp=now_ms(),
+        api="openai-completions",
+        provider="qwen",
+        model="qwen-plus",
+    )
+
+
 
 """  6. 执行本地工具 list_project_tree  """
 """
@@ -300,6 +338,76 @@ def call_qwen_for_tool_call(
     - validateToolCall / validateToolArguments 的职责
 """
 
+def list_project_tree(root: str = ".", max_depth: int = 3) -> str:
+    """
+    本地工具: 返回项目根目录下的目录 tree。
+
+    当前脚本路径:
+        study_area/01_ai/p6_qwen_tool_call.py
+
+    项目根目录:
+        Path(__file__).resolve().parents[2]
+    """
+    base_dir = Path(__file__).resolve().parents[2]
+    target = (base_dir / root).resolve()
+    max_depth = max(0, min(max_depth, 5))
+    ignored_names = {".git", "node_modules", "__pycache__", ".pytest_cache", "dist", "build"}
+
+    if not target.exists():
+        return f"Path not found: {target}"
+    if not target.is_dir():
+        return f"Not a directory: {target}"
+
+    lines = [target.name]
+
+    def walk(path: Path, depth: int, prefix: str = "") -> None:
+        if depth >= max_depth:
+            return
+
+        children = sorted(
+            [child for child in path.iterdir() if child.name not in ignored_names],
+            key=lambda child: (not child.is_dir(), child.name.lower()),
+        )
+
+        for index, child in enumerate(children):
+            is_last = index == len(children) - 1
+            connector = "└── " if is_last else "├── "
+            lines.append(f"{prefix}{connector}{child.name}")
+
+            if child.is_dir():
+                extension = "    " if is_last else "│   "
+                walk(child, depth + 1, prefix + extension)
+
+    walk(target, 0)
+    return "\n".join(lines)
+
+
+def execute_tool_call(tool_call: ToolCall) -> ToolResultMessage:
+    if tool_call.name != "list_project_tree":
+        result = f"Unknown tool: {tool_call.name}"
+        is_error = True
+    else:
+        try:
+            root = str(tool_call.arguments.get("root", "."))
+            max_depth = int(tool_call.arguments.get("max_depth", 3))
+            result = list_project_tree(root=root, max_depth=max_depth)
+            is_error = False
+        except (TypeError, ValueError) as error:
+            result = f"Invalid tool arguments: {error}"
+            is_error = True
+        except Exception as error:
+            result = f"Tool execution failed: {error}"
+            is_error = True
+
+    return ToolResultMessage(
+        role="toolResult",
+        tool_call_id=tool_call.id,
+        tool_name=tool_call.name,
+        content=[TextContent(type="text", text=result)],
+        is_error=is_error,
+        timestamp=now_ms(),
+    )
+
 """  7. ToolResultMessage 回填到 Context 和 provider messages  """
 """
 内部结构:
@@ -308,6 +416,8 @@ def call_qwen_for_tool_call(
 Provider payload:
     转成 OpenAI-compatible tool message:
         {"role": "tool", "tool_call_id": ..., "content": ...}
+
+注意: 为了让 provider 接受 tool result，通常必须要让 assistant message 里之前的 toolcall id 和 tool result message 里的 id 匹配.
 
 对应源码:
     packages/ai/src/types.ts
@@ -319,6 +429,10 @@ Provider payload:
     - tool call 没有对应 tool result 时 provider 会如何处理
 """
 
+# 1. ToolResultMessage 回填到 context.messages: 在 Main 中实现即可.
+
+# 2. 转换 provider messages: section 3 中定义的 context_to_openai_messages 函数中已支持.
+
 """  8. 第二次调用 Qwen: 得到最终 AssistantMessage  """
 """
 带着 tool result 再次请求 Qwen。
@@ -326,6 +440,32 @@ Provider payload:
 预期结果:
     模型基于项目 tree 判断当前学习进度, 并给出下一步建议。
 """
+
+def usage_from_qwen_response(response) -> Usage:
+    usage = response.usage
+    if usage is None:
+        return Usage()
+
+    return Usage(
+        input=usage.prompt_tokens or 0,
+        output=usage.completion_tokens or 0,
+        cache_read=0,
+        cache_write=0,
+        total_tokens=usage.total_tokens or 0,
+    )
+
+
+def create_assistant_message_from_text(text: str, usage: Usage) -> AssistantMessage:
+    return AssistantMessage(
+        role="assistant",
+        content=[TextContent(type="text", text=text)],
+        usage=usage,
+        stop_reason="stop",
+        timestamp=now_ms(),
+        api="openai-completions",
+        provider="qwen",
+        model="qwen-plus",
+    )
 
 """  9. main: 串起完整 tool loop  """
 """
@@ -348,27 +488,69 @@ if __name__ == "__main__":
     import json
     from dataclasses import asdict
 
-    print("=" * 60, "\n1. API Key / 密钥")
+    print("=" * 60, "\n1 API Key / 密钥")
     api_key = get_qwen_api_key()
     print("QWEN_API_KEY loaded")
 
-    print("=" * 60, "\n2. Context / 上下文")
+    print("=" * 60, "\n2 Context / 上下文")
     context = create_context()
     print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
 
-    print("=" * 60, "\n3. OpenAI Messages / API 消息格式")
+    print("=" * 60, "\n3.1 OpenAI Messages / API 消息格式")
     openai_messages = context_to_openai_messages(context)
     print(json.dumps(openai_messages, indent=2, ensure_ascii=False))
 
-    print("=" * 60, "\n4. OpenAI Tools / API 工具定义")
+    print("=" * 60, "\n3.2 OpenAI Tools / API 工具定义")
     openai_tools = tools_to_openai_tools(context.tools)
     print(json.dumps(openai_tools, indent=2, ensure_ascii=False))
 
-    print("=" * 60, "\n5. Qwen Raw Assistant Message / Qwen 原始助手消息")
+    print("=" * 60, "\n4.1 Qwen Raw Assistant Message / Qwen 原始助手消息")
     response = call_qwen_for_tool_call(api_key, openai_messages, openai_tools)
     message = response.choices[0].message
     print(message)
 
-    print("=" * 60, "\n6. Qwen Tool Calls / Qwen 工具调用")
+    print("=" * 60, "\n4.2 Qwen Tool Calls / Qwen 工具调用")
     print(message.tool_calls)
+
+    print("=" * 60, "\n5.1 Parsed ToolCalls / 解析后的工具调用")
+    tool_calls = parse_provider_tool_call_list(message.tool_calls)
+    print(json.dumps([asdict(tool_call) for tool_call in tool_calls], indent=2, ensure_ascii=False))
+
+    print("=" * 60, "\n5.2 AssistantMessage With ToolCalls / 包含工具调用的助手消息")
+    assistant_tool_call_message = create_assistant_message_from_tool_calls(tool_calls)
+    context.messages.append(assistant_tool_call_message)
+    print(json.dumps(asdict(assistant_tool_call_message), indent=2, ensure_ascii=False))
+
+    print("=" * 60, "\n6 Tool Results / 工具执行结果")
+    tool_results = [execute_tool_call(tool_call) for tool_call in tool_calls]
+    print(json.dumps([asdict(tool_result) for tool_result in tool_results], indent=2, ensure_ascii=False))
+
+    for tool_result in tool_results:
+        context.messages.append(tool_result)
+
+    print("=" * 60, "\n7.1 ContextAfterToolResults / 工具结果后的上下文")
+    print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
+
+    print("=" * 60, "\n7.2 OpenAIMessagesAfterToolResults / 工具结果后的 API 消息格式")
+    openai_messages_after_tools = context_to_openai_messages(context)
+    print(json.dumps(openai_messages_after_tools, indent=2, ensure_ascii=False))
+
+    print("=" * 60, "\n8.1 Qwen Final Raw Assistant Message / Qwen 最终原始助手消息")
+    final_response = call_qwen_for_tool_call(api_key, openai_messages_after_tools, openai_tools)
+    final_raw_message = final_response.choices[0].message
+    print(final_raw_message)
+
+    if final_raw_message.tool_calls:
+        print("Model requested more tool calls; current P6 stops here.")
+    else:
+        print("=" * 60, "\n8.2 Final AssistantMessage / 最终助手消息")
+        final_text = final_raw_message.content or ""
+        final_usage = usage_from_qwen_response(final_response)
+        final_assistant_message = create_assistant_message_from_text(final_text, final_usage)
+        context.messages.append(final_assistant_message)
+        print(json.dumps(asdict(final_assistant_message), indent=2, ensure_ascii=False))
+
+        print("=" * 60, "\n8.3 ContextAfterToolLoop / 工具循环后的上下文")
+        print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
+
     print("=" * 60)
