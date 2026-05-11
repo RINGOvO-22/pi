@@ -102,10 +102,12 @@ Phase 4 实现范围:
 def context_to_openai_messages(context: Context) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
 
+    # 1. system promtp
     if context.system_prompt:
         messages.append({"role": "system", "content": context.system_prompt})
 
     for message in context.messages:
+        # 2. user message
         # Recall: UserMessage 的 content 由两种形态: str | 内容块列表(文本 or 图像)
         if isinstance(message, UserMessage):
             if isinstance(message.content, str):
@@ -116,6 +118,7 @@ def context_to_openai_messages(context: Context) -> list[dict[str, str]]:
                 )
             messages.append({"role": "user", "content": content})
 
+        # 3. assistant mesage
         # Recall: AssistantMessage 的 content 为内容块列表(文本/Thinking/ToolCall)
         elif isinstance(message, AssistantMessage):
             content = "\n".join(
@@ -300,28 +303,26 @@ if __name__ == "__main__":
     import json
     from dataclasses import asdict
 
-    print("="*60)
+    print("=" * 60, "\n1. API Key / 密钥")
     api_key = get_qwen_api_key()
     print("QWEN_API_KEY loaded")
 
-    print("="*60)
+    print("=" * 60, "\n2. Context / 上下文")
     context = create_context()
-    print(json.dumps({"Context": asdict(context)}, indent=2, ensure_ascii=False))
+    print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
 
-    print("="*60)
+    print("=" * 60, "\n3. OpenAI Messages / API 消息格式")
     openai_messages = context_to_openai_messages(context)
-    print(json.dumps({"OpenAIMessages": openai_messages}, indent=2, ensure_ascii=False))
+    print(json.dumps(openai_messages, indent=2, ensure_ascii=False))
 
-    print("="*60)
-    print("Qwen stream output:")
+    print("=" * 60, "\n4. Qwen Stream Output / Qwen 流式输出")
     events = call_qwen_stream(api_key, openai_messages)
     assistant_message = consume_qwen_stream(events)
 
-    print("="*60)
-    # API 对应的请求格式下的发给模型的消息
-    print(json.dumps({"QwenAssistantMessage": asdict(assistant_message)}, indent=2, ensure_ascii=False))
+    print("=" * 60, "\n5. Qwen AssistantMessage / Qwen 助手消息")
+    print(json.dumps(asdict(assistant_message), indent=2, ensure_ascii=False))
 
-    print("="*60)
+    print("=" * 60, "\n6. ContextAfterAssistant / 追加助手消息后的上下文")
     context.messages.append(assistant_message)
-    print(json.dumps({"ContextAfterAssistant": asdict(context)}, indent=2, ensure_ascii=False))
-    print("="*60)
+    print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
+    print("=" * 60)
