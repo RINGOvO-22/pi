@@ -194,25 +194,27 @@ if __name__ == "__main__":
     import json
     from dataclasses import asdict
 
-    print("="*60)
+    print("=" * 60, "\n1 API Key / 密钥")
     api_key = get_qwen_api_key()
     print("QWEN_API_KEY loaded")
 
-    print("="*60)
+    print("=" * 60, "\n2 Context / 上下文")
     context = create_context()
-    print(json.dumps({"Context": asdict(context)}, indent=2, ensure_ascii=False))
+    print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
 
-    print("="*60)
+    print("=" * 60, "\n3 OpenAI Messages / API 消息格式")
     openai_messages = context_to_openai_messages(context)
-    print(json.dumps({"OpenAIMessages": openai_messages}, indent=2, ensure_ascii=False))
+    print(json.dumps(openai_messages, indent=2, ensure_ascii=False))
 
-    print("="*60)
+    print("=" * 60, "\n4.1 QwenAssistantText / Qwen 助手文本")
     assistant_text, usage = call_qwen_complete(api_key, openai_messages)
-    print(json.dumps({"QwenAssistantText": assistant_text}, indent=2, ensure_ascii=False))
-    print(json.dumps({"QwenUsage": asdict(usage)}, indent=2, ensure_ascii=False))
+    print(json.dumps(assistant_text, indent=2, ensure_ascii=False))
+
+    print("=" * 60, "\n4.2 QwenUsage / Qwen 用量")
+    print(json.dumps(asdict(usage), indent=2, ensure_ascii=False))
     
-    print("="*60)
+    print("=" * 60, "\n5 ContextAfterAssistant / 追加助手消息后的上下文")
     assistant_message = create_assistant_message_from_text(assistant_text, usage)
     context.messages.append(assistant_message)
-    print(json.dumps({"ContextAfterAssistant": asdict(context)}, indent=2, ensure_ascii=False))
-    print("="*60)
+    print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
+    print("=" * 60)

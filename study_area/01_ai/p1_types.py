@@ -515,4 +515,6 @@ if __name__ == "__main__":
         )
     )
 
-    print(json.dumps({"Context": asdict(context)}, indent=2, ensure_ascii=False))
+    print("=" * 60, "\n1 Context / 上下文")
+    print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
+    print("=" * 60)

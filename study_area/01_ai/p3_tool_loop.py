@@ -176,4 +176,6 @@ if __name__ == "__main__":
     second_assistant_message = fake_model_second_turn(context)
     context.messages.append(second_assistant_message)
 
-    print(json.dumps({"Context": asdict(context)}, indent=2, ensure_ascii=False))
+    print("=" * 60, "\n1 ContextAfterToolLoop / 工具循环后的上下文")
+    print(json.dumps(asdict(context), indent=2, ensure_ascii=False))
+    print("=" * 60)
