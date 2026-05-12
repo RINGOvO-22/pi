@@ -1,6 +1,6 @@
 """  总览: 流式事件类型  """
 """
-P8 中的 stream event 用来描述 assistant message 的生成过程。
+P8 中的 stream event, 用来描述 assistant message 的生成过程。
 
 静态结果:
     AssistantMessage

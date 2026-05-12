@@ -5,13 +5,13 @@
 来源:
     迁移 P7 的反序列化 helpers 和 load/save 逻辑。
 
-职责边界:
-    memory.py 只负责 JSON <-> Context。
-    create_context / append_user_message 后续放到 main.py / agent_loop.py。
-
 两个主函数:
     load_context(path): 从 JSON 文件读取并恢复 Context; 文件不存在或为空时返回 None。
     save_context(context, path): 将 Context 转成 dict, 再保存为 JSON 文件。
+
+职责边界:
+    memory.py 只负责 JSON <-> Context。
+    create_context / append_user_message 后续放到 main.py / agent_loop.py。
 """
 
 """  1. 准备路径 / 基础依赖  """
