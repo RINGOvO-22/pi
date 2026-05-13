@@ -137,6 +137,6 @@ if __name__ == "__main__":
 
             append_user_message(context, user_input)
             print("assistant: ", end="", flush=True)
-            context = run_agent_loop(api_key, context, verbose=False)
+            context = run_agent_loop(api_key, context, verbose=False, char_delay=0.01)
             save_context(context)
             save_last_response(context)

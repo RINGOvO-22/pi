@@ -67,14 +67,23 @@ def append_user_message(context: Context, content: str) -> None:
     done.message 才是可以 append 到 context.messages 的最终消息。
 """
 
-def consume_events(events: Iterator[AssistantMessageEvent], verbose: bool = True) -> AssistantMessage:
+def consume_events(
+    events: Iterator[AssistantMessageEvent],
+    verbose: bool = True,
+    char_delay: float = 0.0,
+) -> AssistantMessage:
     final_message: AssistantMessage | None = None
 
     for event in events:
         event_type = event["type"]
 
         if event_type == "text_delta":
-            print(event["delta"], end="", flush=True)
+            if char_delay > 0:
+                for char in event["delta"]:
+                    print(char, end="", flush=True)
+                    time.sleep(char_delay)
+            else:
+                print(event["delta"], end="", flush=True)
 
         elif verbose and event_type == "toolcall_start":
             print("[toolcall_start]")
@@ -118,7 +127,13 @@ def get_tool_calls(message: AssistantMessage) -> list[ToolCall]:
     没有 ToolCall 时, agent 结束。
 """
 
-def run_agent_loop(api_key: str, context: Context, max_turns: int = 5, verbose: bool = True) -> Context:
+def run_agent_loop(
+    api_key: str,
+    context: Context,
+    max_turns: int = 5,
+    verbose: bool = True,
+    char_delay: float = 0.0,
+) -> Context:
     for turn_index in range(max_turns):
         if verbose:
             print("=" * 60, f"\n7.{turn_index + 1}.1 OpenAI Messages / API 消息格式")
@@ -135,7 +150,7 @@ def run_agent_loop(api_key: str, context: Context, max_turns: int = 5, verbose: 
         if verbose:
             print("=" * 60, f"\n7.{turn_index + 1}.3 Qwen Stream / Qwen 流式输出")
         events = stream_qwen(api_key, openai_messages, openai_tools)
-        assistant_message = consume_events(events, verbose=verbose)
+        assistant_message = consume_events(events, verbose=verbose, char_delay=char_delay)
         context.messages.append(assistant_message)
 
         if verbose:
