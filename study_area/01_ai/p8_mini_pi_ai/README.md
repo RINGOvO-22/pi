@@ -11,6 +11,40 @@ Context memory
 + agent loop
 ```
 
+## 使用说明
+
+从 `study_area/01_ai` 目录用模块方式运行:
+
+```bash
+cd /home/djh/workspace/pi/study_area/01_ai
+python -m p8_mini_pi_ai.main
+```
+
+交互模式:
+
+```text
+user: 你的输入
+assistant: 模型回复
+```
+
+退出命令:
+
+```text
+q
+quit
+exit
+```
+
+运行后会更新:
+
+```text
+p8_mini_pi_ai/context_memory.json
+p8_mini_pi_ai/last_response.md
+```
+
+注意:
+    不要直接运行 `python p8_mini_pi_ai/main.py`, 需要用 `python -m p8_mini_pi_ai.main`。
+
 ## 开发顺序
 
 ### 1. `types.py` - 核心类型
