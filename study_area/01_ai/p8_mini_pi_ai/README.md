@@ -13,7 +13,13 @@ Context memory
 
 ## 使用说明
 
-从 `study_area/01_ai` 目录用模块方式运行:
+推荐使用 launcher:
+
+```bash
+./study_area/01_ai/p8_launcher.sh
+```
+
+也可以从 `study_area/01_ai` 目录用模块方式运行:
 
 ```bash
 cd /home/djh/workspace/pi/study_area/01_ai
@@ -40,6 +46,26 @@ exit
 ```text
 p8_mini_pi_ai/context_memory.json
 p8_mini_pi_ai/last_response.md
+```
+
+清空记忆:
+
+```bash
+rm study_area/01_ai/p8_mini_pi_ai/context_memory.json
+```
+
+效果:
+
+```text
+下次启动时 load_context() 返回 None
+程序会重新 create_context()
+等价于开始一段新的对话记忆
+```
+
+也可以删除最近回复文件:
+
+```bash
+rm study_area/01_ai/p8_mini_pi_ai/last_response.md
 ```
 
 注意:
