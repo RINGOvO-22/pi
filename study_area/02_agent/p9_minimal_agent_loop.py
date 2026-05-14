@@ -41,7 +41,7 @@ P9 重点:
 import json
 import time
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Literal, TypedDict
 
 from p8_mini_pi_ai.context import context_to_openai_messages, tools_to_openai_tools
@@ -59,24 +59,40 @@ from p8_mini_pi_ai.types import (
 )
 
 
-"""  2. AgentState / Agent 状态  """
+"""  2. AgentContext / AgentState  """
 """
-AgentState 用来描述一次 agent run 的运行状态。
+源码中有两个相关概念:
+    (1) AgentContext:
+        一次 agent loop 的上下文快照。
+        包含 systemPrompt / messages / tools。
 
-可以包含:
-    - context: 当前上下文
-    - turn_index: 当前第几轮
-    - max_turns: 最大循环次数
-    - stopped: 是否停止
-    - stop_reason: 为什么停止
+    (2) AgentState:
+        agent 当前可观察运行状态。
+        除了上下文, 还包含 isStreaming / streamingMessage / pendingToolCalls / errorMessage 等运行时信息。
 
-对应 P8:
-    run_agent_loop(api_key, context, max_turns=5)
+P9 简化:
+    不单独定义 AgentContext。
+    直接复用 P8 的 Context 作为 AgentContext。
 
-对应源码关注:
+可以理解为:
+    AgentContext = Context
+    AgentState = Context + runtime state
+
+对应源码:
     packages/agent/src/types.ts
-    packages/agent/src/agent-loop.ts
 """
+
+@dataclass
+class AgentState:
+    context: Context
+    turn_index: int
+    max_turns: int
+    stopped: bool = False
+    stop_reason: str | None = None
+    is_streaming: bool = False
+    streaming_message: AssistantMessage | None = None
+    pending_tool_calls: set[str] = field(default_factory=set)
+    error_message: str | None = None
 
 
 """  3. AgentEvent / Agent 事件  """
@@ -86,19 +102,113 @@ Model stream event 描述模型生成过程:
     toolcall_delta
     done
 
-AgentEvent 描述 agent 行为过程:
-    agent_start
-    model_start
-    model_done
-    tool_start
-    tool_done
-    agent_done
-    agent_error
+AgentEvent 描述 agent 行为过程。
+它比 model stream event 更高一层, 用来给 UI / 日志 / hook 观察整个 agent run。
+
+生命周期:
+    agent_start: 一次 agent run 开始。
+    agent_end: 一次 agent run 结束, 携带本次产生的 messages。
+
+Turn 生命周期:
+    turn_start: 一轮 assistant response 开始。
+    turn_end: 一轮 assistant response 以及该轮工具执行结束。
+
+Message 生命周期:
+    message_start: 一条 message 开始。
+    message_update: assistant streaming 中的增量更新, 内部携带 AssistantMessageEvent。
+    message_end: 一条 message 完成。
+
+Tool 生命周期:
+    tool_execution_start: 工具开始执行。
+    tool_execution_update: 工具执行中的 partial update, 用于长任务进度或中间结果。
+    tool_execution_end: 工具执行完成, 携带最终结果和 is_error。
 
 区别:
     stream event 是模型层事件。
     agent event 是 agent 编排层事件。
+    message_update 是两者的连接点: AgentEvent 包住 AssistantMessageEvent。
+
+P9 和源码:
+    这里基本保留源码 AgentEvent 的核心结构。
+    字段名使用 Python snake_case, 例如 tool_call_id / tool_results。
+
+对应源码:
+    packages/agent/src/types.ts AgentEvent
 """
+
+AgentMessage = UserMessage | AssistantMessage | ToolResultMessage
+
+
+class AgentStartEvent(TypedDict):
+    type: Literal["agent_start"]
+
+
+class AgentEndEvent(TypedDict):
+    type: Literal["agent_end"]
+    messages: list[AgentMessage]
+
+
+class TurnStartEvent(TypedDict):
+    type: Literal["turn_start"]
+
+
+class TurnEndEvent(TypedDict):
+    type: Literal["turn_end"]
+    message: AgentMessage
+    tool_results: list[ToolResultMessage]
+
+
+class MessageStartEvent(TypedDict):
+    type: Literal["message_start"]
+    message: AgentMessage
+
+
+class MessageUpdateEvent(TypedDict):
+    type: Literal["message_update"]
+    message: AgentMessage
+    assistant_message_event: AssistantMessageEvent
+
+
+class MessageEndEvent(TypedDict):
+    type: Literal["message_end"]
+    message: AgentMessage
+
+
+class ToolExecutionStartEvent(TypedDict):
+    type: Literal["tool_execution_start"]
+    tool_call_id: str
+    tool_name: str
+    args: dict
+
+
+class ToolExecutionUpdateEvent(TypedDict):
+    type: Literal["tool_execution_update"]
+    tool_call_id: str
+    tool_name: str
+    args: dict
+    partial_result: object
+
+
+class ToolExecutionEndEvent(TypedDict):
+    type: Literal["tool_execution_end"]
+    tool_call_id: str
+    tool_name: str
+    result: object
+    is_error: bool
+
+
+AgentEvent = (
+    AgentStartEvent
+    | AgentEndEvent
+    | TurnStartEvent
+    | TurnEndEvent
+    | MessageStartEvent
+    | MessageUpdateEvent
+    | MessageEndEvent
+    | ToolExecutionStartEvent
+    | ToolExecutionUpdateEvent
+    | ToolExecutionEndEvent
+)
 
 
 """  4. create_initial_state  """
@@ -106,16 +216,38 @@ AgentEvent 描述 agent 行为过程:
 创建一次 agent run 的初始状态。
 
 输入:
-    Context
-    max_turns
+    context: 已有 Context, 相当于源码里的 AgentContext。
+    max_turns: 最大循环次数, 用来防止无限 tool loop。
 
 输出:
     AgentState
 
-注意:
-    这里不负责创建 Context。
-    Context 创建仍然可以由 main / memory 层负责。
+作用:
+    把静态 Context 包装成可运行状态。
+    后续 loop 会持续更新 turn_index / stopped / stop_reason / is_streaming / pending_tool_calls。
+
+不负责:
+    - 创建 Context
+    - 读取 memory
+    - 追加 UserMessage
+    - 调用模型
+    - 执行工具
+    - 保存 Context
+
+对应关系:
+    P8: run_agent_loop(api_key, context, max_turns=5)
+    P9: state = create_initial_state(context, max_turns)
+
+可以理解为:
+    Context -> AgentState
 """
+
+def create_initial_state(context: Context, max_turns: int = 5) -> AgentState:
+    return AgentState(
+        context=context,
+        turn_index=0,
+        max_turns=max_turns,
+    )
 
 
 """  5. append_user_message  """
