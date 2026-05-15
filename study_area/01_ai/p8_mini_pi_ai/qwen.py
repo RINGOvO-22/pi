@@ -26,8 +26,17 @@ from .stream import AssistantMessageEvent
 from .types import AssistantMessage, TextContent, ToolCall, Usage
 
 
+def find_project_root(start: Path) -> Path:
+    for path in [start, *start.parents]:
+        if (path / "AGENTS.md").exists() and (path / "package.json").exists():
+            return path
+
+    return start
+
+
 def get_qwen_api_key() -> str:
-    env_path = Path(__file__).resolve().parents[1] / ".env"
+    project_root = find_project_root(Path(__file__).resolve())
+    env_path = project_root / ".env"
     load_dotenv(env_path)
 
     api_key = os.environ.get("QWEN_API_KEY")
