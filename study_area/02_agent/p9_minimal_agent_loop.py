@@ -351,7 +351,7 @@ def call_model_once(
         openai_messages = context_to_openai_messages(state.context)
         openai_tools = tools_to_openai_tools(state.context.tools)
         events = stream_qwen(api_key, openai_messages, openai_tools) # 是一个 iterator
-        assistant_message = consume_model_events(state, events, char_delay=char_delay)
+        assistant_message = consume_model_events(state, events, char_delay=char_delay) # final AssistantMessage
         state.context.messages.append(assistant_message)
         return assistant_message
     finally:
@@ -471,7 +471,7 @@ def decide_next_step(
         state.error_message = f"Agent loop exceeded max_turns={state.max_turns}"
         return "error"
 
-    return "continue"
+    return "continue" 
 
 
 """  10. run_agent  """

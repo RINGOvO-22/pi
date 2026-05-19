@@ -351,6 +351,44 @@
       "response_id": null,
       "error_message": null,
       "diagnostics": null
+    },
+    {
+      "role": "user",
+      "content": "nihao",
+      "timestamp": 1779183792557
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "你好！需要帮你解读代码、梳理概念，还是运行某个练习？",
+          "text_signature": null
+        }
+      ],
+      "usage": {
+        "input": 2184,
+        "output": 15,
+        "cache_read": 0,
+        "cache_write": 0,
+        "total_tokens": 2199,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cache_read": 0,
+          "cache_write": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "stop",
+      "timestamp": 1779183794073,
+      "api": "openai-completions",
+      "provider": "qwen",
+      "model": "qwen-plus",
+      "response_model": null,
+      "response_id": null,
+      "error_message": null,
+      "diagnostics": null
     }
   ],
   "system_prompt": "我正在借当前项目学习 agent 应用开发。你是我的学习助手。如果需要了解项目结构或学习进度, 优先调用可用工具。回答要简洁明了, 不要使用特殊符号",
