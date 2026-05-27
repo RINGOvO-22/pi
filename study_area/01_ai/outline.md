@@ -1,13 +1,13 @@
 # 概览
 ## 整体功能
 
-1. 模型发现                                                                                 
-2. provider 配置                                                                            
-3. 统一流式调用                                                                             
-4. tool calling                                                                             
-5. token / cost 统计                                                                        
-6. context 持久化                                                                           
-7. 跨 provider 切换                                                                         
+1. 模型发现
+2. provider 配置
+3. 统一流式调用
+4. tool calling
+5. token / cost 统计
+6. context 持久化
+7. 跨 provider 切换
 8. OAuth / API Key 管理
 
 ## 核心概念
