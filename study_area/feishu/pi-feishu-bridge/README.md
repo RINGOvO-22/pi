@@ -1,26 +1,15 @@
 # pi-feishu-bridge
 
-最小 bridge：先只负责连接飞书长连接，并打印收到的消息事件。
+正式 bridge 原型：接收飞书文本消息，调用本机 pi CLI，并把 pi 输出回复到飞书。
 
-## 1. 创建 conda 环境
+## 1. 安装依赖
 
-推荐使用 conda 环境：
-
-```bash
-cd study_area/feishu/pi-feishu-bridge
-conda create -n pi-feishu-bridge python=3.11 -y
-conda activate pi-feishu-bridge
-pip install -r requirements.txt
-```
-
-以后每次重新打开终端，只需要：
+可以复用已有 conda 环境：
 
 ```bash
 cd study_area/feishu/pi-feishu-bridge
-conda activate pi-feishu-bridge
+/home/ringo/miniforge3/envs/pi/bin/pip install -r requirements.txt
 ```
-
-如果你想用更短的环境名，也可以把 `pi-feishu-bridge` 换成 `feishu-pi`。
 
 ## 2. 配置环境变量
 
@@ -28,45 +17,48 @@ conda activate pi-feishu-bridge
 cp .env.example .env
 ```
 
-编辑 `.env`，填入飞书开放平台里的：
+编辑 `.env`：
 
 ```bash
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
+PI_COMMAND=/home/ringo/.nvm/versions/node/v22.22.2/bin/pi
+PI_WORKDIR=/home/ringo/workspace/pi-feishu-workspace
+PI_TIMEOUT_SECONDS=300
 ```
 
-第一版可以先不填：
+## 3. 启动
+
+先单独确认 pi CLI 能返回：
 
 ```bash
-FEISHU_VERIFICATION_TOKEN=
-FEISHU_ENCRYPT_KEY=
+cd /home/ringo/workspace/pi-feishu-workspace
+/home/ringo/.nvm/versions/node/v22.22.2/bin/pi -p "只回复 OK"
 ```
 
-## 3. 启动长连接
+再启动 bridge。bridge 项目目录下：
 
 ```bash
-python bridge.py
+cd /home/ringo/workspace/pi/study_area/feishu/pi-feishu-bridge
+/home/ringo/miniforge3/envs/pi/bin/python -m src.main
 ```
 
-看到类似日志后，保持这个进程运行：
+保持进程运行，然后在飞书里私聊机器人。
 
-```text
-Starting Feishu long connection client...
-Keep this process running, then click '验证连接状态' in Feishu Open Platform.
-```
+## 4. 当前能力
 
-## 4. 回飞书后台验证
+- 使用飞书长连接接收 `im.message.receive_v1`。
+- 支持文本消息。
+- 支持 `/help`。
+- 调用本机 pi CLI：`PI_COMMAND -p "用户消息"`。
+- 把 pi 的 stdout 作为唯一回复发回飞书。
+- 按 `message_id` 跳过飞书重复推送的同一条消息。
+- 长输出超过 4000 字符时截断。
 
-回到飞书开放平台的长连接配置页面，点击：
+## 5. 暂不支持
 
-```text
-验证连接状态
-```
-
-如果成功，说明本机 bridge 已经连上飞书。
-
-## 5. 测试收消息
-
-在飞书里私聊机器人，或在测试群里 @ 机器人。
-
-如果配置正确，终端会打印 `im.message.receive_v1` 事件内容。
+- 多轮 session。
+- 流式回复。
+- `/new`、`/abort`、`/status`。
+- 文件和图片。
+- 群聊复杂权限控制。

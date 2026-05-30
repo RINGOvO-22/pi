@@ -209,7 +209,7 @@ https://open.feishu.cn/
 创建一个企业自建应用，例如：
 
 ```text
-pi-feishu-bridge
+pi-feishu-bridge-toy
 ```
 
 这个应用后面就是你的飞书机器人。
@@ -276,7 +276,7 @@ FEISHU_ENCRYPT_KEY=
 建议目录：
 
 ```text
-study_area/feishu/pi-feishu-bridge/
+study_area/feishu/pi-feishu-bridge-toy/
 ```
 
 做到这一步的目标不是完整机器人，而是让飞书后台能验证：你的本机确实有一个客户端连上来了。
@@ -352,7 +352,7 @@ FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
 FEISHU_VERIFICATION_TOKEN=
 FEISHU_ENCRYPT_KEY=
-PI_COMMAND=node /home/ringo/workspace/pi/packages/coding-agent/dist/cli.js
+PI_COMMAND=/home/ringo/.nvm/versions/node/v22.22.2/bin/pi
 PI_WORKDIR=/home/ringo/workspace/pi-feishu-workspace
 ```
 
@@ -425,22 +425,40 @@ PI_WORKDIR=/home/ringo/workspace/pi-feishu-workspace
 
 ## 5. bridge server 设计
 
-建议新建独立目录：
+正式 bridge 使用独立目录，和 Chapter 4 的 toy 项目分开：
 
 ```text
-study_area/feishu/pi-feishu-bridge/
+study_area/feishu/pi-feishu-bridge-toy/   # Chapter 4 验证长连接用
+study_area/feishu/pi-feishu-bridge/       # Chapter 5 正式 bridge 原型
 ```
+
+当前正式 bridge 先继续使用 Python，原因是 toy 版本已经验证了飞书 Python SDK 长连接可用。
 
 建议模块：
 
 ```text
-src/server.ts              bridge 入口，启动飞书长连接事件消费者
-src/feishu/client.ts       飞书 OpenAPI client
-src/feishu/events.ts       飞书事件解析和校验
-src/pi/runner.ts           pi 调用封装，先 CLI，后 SDK/RPC
-src/session/store.ts       飞书 chat/user 到 pi session 的映射
-src/commands.ts            /new /abort /status 等命令
-src/config.ts              环境变量配置
+study_area/feishu/pi-feishu-bridge/
+  README.md
+  requirements.txt
+  .env.example
+  .gitignore
+
+  src/
+    main.py                 程序入口，启动飞书长连接事件消费者
+    config.py               读取环境变量
+    logging_config.py       日志配置
+
+    feishu/
+      client.py             创建飞书 OpenAPI client
+      events.py             飞书事件解析，把 SDK 事件转成内部结构
+      messenger.py          回复飞书消息
+
+    pi/
+      runner.py             调用本机 pi，第一版先用 CLI 子进程
+
+    app/
+      bridge.py             核心流程：飞书消息 → pi → 飞书回复
+      commands.py           /help 等简单命令
 ```
 
 环境变量：
@@ -450,9 +468,26 @@ FEISHU_APP_ID=
 FEISHU_APP_SECRET=
 FEISHU_VERIFICATION_TOKEN=
 FEISHU_ENCRYPT_KEY=
-PI_COMMAND=node /path/to/pi/packages/coding-agent/dist/cli.js
+PI_COMMAND=/home/ringo/.nvm/versions/node/v22.22.2/bin/pi
 PI_WORKDIR=/path/to/workdir
+PI_TIMEOUT_SECONDS=300
 ```
+
+第一版只做最小链路：
+
+```text
+收到飞书文本消息
+  ↓
+解析消息 text
+  ↓
+调用本机 pi CLI
+  ↓
+捕获 stdout
+  ↓
+回复到飞书
+```
+
+暂不做：多轮 session、流式输出、RPC、附件、复杂群聊权限控制。
 
 ## 6. 第一阶段：最小可用原型
 
