@@ -425,43 +425,103 @@ PI_WORKDIR=/home/ringo/workspace/pi-feishu-workspace
 
 ## 5. bridge server 设计
 
-正式 bridge 使用独立目录，和 Chapter 4 的 toy 项目分开：
+bridge 项目按阶段拆分，避免把验证代码、CLI 原型和 RPC 原型混在一起：
 
 ```text
-study_area/feishu/pi-feishu-bridge-toy/   # Chapter 4 验证长连接用
-study_area/feishu/pi-feishu-bridge/       # Chapter 5 正式 bridge 原型
+study_area/feishu/pi-feishu-bridge-toy/   # Chapter 4：验证飞书长连接和固定回复
+study_area/feishu/pi-feishu-bridge-cli/   # Chapter 5：CLI 单轮原型，每条消息执行一次 pi -p
+study_area/feishu/pi-feishu-bridge-rpc/   # Chapter 6：RPC 常驻进程原型，下一步主线
 ```
 
-当前正式 bridge 先继续使用 Python，原因是 toy 版本已经验证了飞书 Python SDK 长连接可用。
+当前已完成 CLI 版原型，下一步转向 RPC 版。
 
-建议模块：
+### 5.1 CLI 版现状
+
+CLI 版目录：
 
 ```text
-study_area/feishu/pi-feishu-bridge/
+study_area/feishu/pi-feishu-bridge-cli/
+```
+
+CLI 版链路：
+
+```text
+收到飞书文本消息
+  ↓
+解析消息 text
+  ↓
+执行 PI_COMMAND -p "用户消息"
+  ↓
+捕获 stdout
+  ↓
+回复到飞书
+```
+
+CLI 版优点：简单，已经跑通飞书消息 → pi → 飞书回复。
+
+CLI 版限制：
+
+- 每条消息都会启动一次 pi CLI，有冷启动成本。
+- 默认是单轮对话，不保留上下文。
+- 不适合 `/abort`、任务状态、流式进度。
+- 飞书重复推送时需要按 `message_id` 去重。
+
+### 5.2 RPC 版目标
+
+RPC 版目录：
+
+```text
+study_area/feishu/pi-feishu-bridge-rpc/
+```
+
+RPC 版目标链路：
+
+```text
+bridge 启动
+  ↓
+启动一个常驻 pi --mode rpc 子进程
+  ↓
+飞书消息到达
+  ↓
+bridge 通过 JSONL 向 pi RPC 发送 prompt
+  ↓
+bridge 从 pi RPC stdout 接收 response/event
+  ↓
+收集 assistant 最终文本
+  ↓
+回复到飞书
+```
+
+RPC 版建议模块：
+
+```text
+study_area/feishu/pi-feishu-bridge-rpc/
   README.md
   requirements.txt
   .env.example
   .gitignore
 
   src/
-    main.py                 程序入口，启动飞书长连接事件消费者
+    main.py                 程序入口
     config.py               读取环境变量
     logging_config.py       日志配置
 
     feishu/
       client.py             创建飞书 OpenAPI client
-      events.py             飞书事件解析，把 SDK 事件转成内部结构
+      events.py             飞书事件解析
       messenger.py          回复飞书消息
 
-    pi/
-      runner.py             调用本机 pi，第一版先用 CLI 子进程
+    pi_rpc/
+      process.py            启动和管理 pi --mode rpc 子进程
+      protocol.py           JSONL 编解码、请求 ID、事件分发
+      session.py            后续 session 管理
 
     app/
-      bridge.py             核心流程：飞书消息 → pi → 飞书回复
-      commands.py           /help 等简单命令
+      bridge.py             核心流程：飞书消息 → RPC prompt → 飞书回复
+      commands.py           /help /new /abort /status
 ```
 
-环境变量：
+RPC 版环境变量：
 
 ```bash
 FEISHU_APP_ID=
@@ -470,54 +530,50 @@ FEISHU_VERIFICATION_TOKEN=
 FEISHU_ENCRYPT_KEY=
 PI_COMMAND=/home/ringo/.nvm/versions/node/v22.22.2/bin/pi
 PI_WORKDIR=/path/to/workdir
-PI_TIMEOUT_SECONDS=300
+PI_SESSION_DIR=/path/to/sessions
+PI_RPC_TIMEOUT_SECONDS=300
 ```
 
-第一版只做最小链路：
+RPC 版第一步只做全局一个 RPC 进程、全局一个会话。多用户 session 隔离后续再做。
+
+## 6. 第一阶段：CLI 最小可用原型
+
+状态：已完成，目录为：
 
 ```text
-收到飞书文本消息
-  ↓
-解析消息 text
-  ↓
-调用本机 pi CLI
-  ↓
-捕获 stdout
-  ↓
-回复到飞书
+study_area/feishu/pi-feishu-bridge-cli/
 ```
-
-暂不做：多轮 session、流式输出、RPC、附件、复杂群聊权限控制。
-
-## 6. 第一阶段：最小可用原型
 
 目标：飞书发一句，pi 回一句。
 
-步骤：
+已完成：
 
-1. 写 bridge 入口，启动飞书长连接事件消费者。
+1. bridge 入口启动飞书长连接事件消费者。
 2. 使用 `APP_ID` / `APP_SECRET` 建立长连接。
 3. 接收文本消息事件 `im.message.receive_v1`。
 4. 调用本地 pi CLI：
 
    ```bash
-   node packages/coding-agent/dist/cli.js -p "飞书用户消息"
+   /home/ringo/.nvm/versions/node/v22.22.2/bin/pi -p "飞书用户消息"
    ```
 
 5. 捕获 stdout。
 6. 调用飞书 API 回复消息。
-7. 加基本日志。
+7. 按 `message_id` 做重复推送去重。
+8. 加基本日志。
 
 限制：
 
+- 仍是单轮对话。
+- 每条消息启动一次 pi CLI，延迟较高。
 - 先不做流式。
 - 先不做多轮 session。
 - 先不处理附件。
 - 先不让 pi 修改敏感目录。
 
-## 7. 第二阶段：session 和命令
+## 7. 第二阶段：RPC、session 和命令
 
-目标：飞书会话能对应 pi 会话。
+目标：用 RPC 版替代 CLI 版，让飞书会话能逐步对应 pi 会话。
 
 设计：
 

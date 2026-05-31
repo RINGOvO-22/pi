@@ -34,7 +34,7 @@ def main() -> None:
         log_level=lark.LogLevel.INFO,
     )
 
-    print("Starting pi-feishu-bridge...")
+    print("Starting pi-feishu-bridge-cli...")
     ws_client.start()
 
 

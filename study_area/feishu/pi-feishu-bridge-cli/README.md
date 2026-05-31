@@ -1,13 +1,13 @@
-# pi-feishu-bridge
+# pi-feishu-bridge-cli
 
-正式 bridge 原型：接收飞书文本消息，调用本机 pi CLI，并把 pi 输出回复到飞书。
+CLI 版 bridge 原型：接收飞书文本消息，每条消息调用一次本机 pi CLI，并把 pi 输出回复到飞书。
 
 ## 1. 安装依赖
 
 可以复用已有 conda 环境：
 
 ```bash
-cd study_area/feishu/pi-feishu-bridge
+cd study_area/feishu/pi-feishu-bridge-cli
 /home/ringo/miniforge3/envs/pi/bin/pip install -r requirements.txt
 ```
 
@@ -39,7 +39,7 @@ cd /home/ringo/workspace/pi-feishu-workspace
 再启动 bridge。bridge 项目目录下：
 
 ```bash
-cd /home/ringo/workspace/pi/study_area/feishu/pi-feishu-bridge
+cd /home/ringo/workspace/pi/study_area/feishu/pi-feishu-bridge-cli
 /home/ringo/miniforge3/envs/pi/bin/python -m src.main
 ```
 
