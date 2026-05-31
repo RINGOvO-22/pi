@@ -277,15 +277,19 @@ src/feishu/messenger.py
 
 ### 3. 新增 pi RPC 进程管理
 
+状态：已完成。
+
 目标：bridge 启动时启动一个常驻 pi RPC 子进程。
 
-建议文件：
+已新增文件：
 
 ```text
+src/pi_rpc/__init__.py
 src/pi_rpc/process.py
+tests/start_rpc_process.py
 ```
 
-职责：
+`PiRpcProcess` 职责：
 
 - 使用 `PI_COMMAND` 启动：
 
@@ -294,14 +298,43 @@ src/pi_rpc/process.py
   ```
 
 - 设置工作目录为 `PI_WORKDIR`。
-- 持有 `stdin`、`stdout`、`stderr`。
-- bridge 退出时关闭子进程。
-- 子进程异常退出时给出明确日志。
+- 创建 `PI_WORKDIR` 和 `PI_SESSION_DIR`。
+- 持有 `stdin` 和 `stdout`，供后续 JSONL 协议层使用。
+- 读取 `stderr` 并写入日志，方便排查 pi 启动失败、认证失败、模型错误等问题。
+- 提供：
+
+  ```python
+  start()
+  stop()
+  is_running()
+  returncode()
+  ```
+
+- 支持 `with PiRpcProcess(config) as rpc_process:`，退出时自动 `stop()`。
+
+验收脚本：
+
+```bash
+cd /home/ringo/workspace/pi/study_area/feishu/pi-feishu-bridge-rpc
+/home/ringo/miniforge3/envs/pi/bin/python tests/start_rpc_process.py
+```
+
+预期：
+
+```text
+is_running: True
+stdin available: True
+stdout available: True
+Sleeping for 3 seconds, then stopping...
+is_running after stop: False
+```
 
 验收标准：
 
-- 启动 bridge 时只启动一个 pi RPC 进程。
+- 能启动一个 pi RPC 进程。
 - 进程不随单条消息结束。
+- 能拿到 stdin/stdout。
+- 调用 `stop()` 后进程退出。
 - 能在日志中看到 RPC 进程启动成功或失败原因。
 
 ### 4. 新增 JSONL 协议层
