@@ -1,4 +1,4 @@
-# Pi 接入飞书计划
+# Pi 接入feishu计划
 
 目标：在飞书里和本机运行的 pi 交互，并预留接入 Feishu CLI / 飞书开放平台能力的扩展点。
 
@@ -58,14 +58,16 @@ bridge server
 
 - 最干净，能直接管理 Agent session。
 - 可以精细控制事件、工具、流式输出、取消任务。
+- bridge 和 pi SDK 都使用 Node.js / TypeScript，不需要维护子进程协议。
 - 更适合长期维护。
 
 缺点：
 
 - 需要读 pi SDK 文档和源码。
 - 需要自己处理 session 持久化和 tool 配置。
+- 需要自己处理飞书消息队列、并发和事件聚合。
 
-适合最终版本。
+适合长期主线。详细设计见 `5.3 SDK 版目标`。
 
 ### 方案 B：本机 bridge 调用 pi CLI 子进程
 
@@ -431,9 +433,10 @@ bridge 项目按阶段拆分，避免把验证代码、CLI 原型和 RPC 原型�
 study_area/feishu/pi-feishu-bridge-toy/   # Chapter 4：验证飞书长连接和固定回复
 study_area/feishu/pi-feishu-bridge-cli/   # Chapter 5：CLI 单轮原型，每条消息执行一次 pi -p
 study_area/feishu/pi-feishu-bridge-rpc/   # Chapter 6：RPC 常驻进程原型，下一步主线
+study_area/feishu/pi-feishu-bridge-sdk/   # SDK 原型：Node.js / TypeScript 直接嵌入 pi
 ```
 
-当前已完成 CLI 版原型，下一步转向 RPC 版。
+当前已完成 CLI 版原型，并已开始 RPC 版验证。新增 SDK 版作为长期主线候选，RPC 版保留为跨语言接入和协议验证方案。
 
 ### 5.1 CLI 版现状
 
@@ -536,6 +539,124 @@ PI_RPC_TIMEOUT_SECONDS=300
 
 RPC 版第一步只做全局一个 RPC 进程、全局一个会话。多用户 session 隔离后续再做。
 
+### 5.3 SDK 版目标
+
+SDK 版目录：
+
+```text
+study_area/feishu/pi-feishu-bridge-sdk/
+```
+
+这里的 SDK 方案特指：bridge 使用 TypeScript 直接调用 `@earendil-works/pi-coding-agent`，而不是启动 `pi --mode rpc` 子进程。
+
+飞书侧也使用官方 Node SDK：
+
+```text
+@larksuiteoapi/node-sdk
+```
+
+SDK 版目标链路：
+
+```text
+bridge 启动
+  ↓
+使用飞书 createLarkChannel() 建立长连接
+  ↓
+飞书消息到达
+  ↓
+事件回调完成校验、去重、入队，并尽快返回
+  ↓
+队列消费者调用 AgentSession.prompt()
+  ↓
+订阅 message_update / agent_end 等事件
+  ↓
+聚合 assistant 文本和任务状态
+  ↓
+调用飞书消息 API 回复
+```
+
+为什么事件回调只负责入队：
+
+- 飞书官方 Node SDK 的底层长连接文档说明：事件需要在 3 秒内完成处理，否则会触发超时重推。
+- pi 任务可能持续数秒或更久，不能在飞书事件回调里直接等待 `session.prompt()` 完成。
+- 收到事件后先按 `message_id` 去重并入队，可以减少重复执行任务的风险。
+
+飞书官方 Node SDK 当前还提供高层 `Channel` 模块，适合 AI 对话机器人。它封装了底层 `WSClient` / `EventDispatcher` / `Client`，并提供消息归一化、安全策略、发送、流式回复、媒体上传和卡片交互。SDK 版优先使用 `createLarkChannel()`；只有在排查底层长连接问题时，再直接使用 `WSClient` / `EventDispatcher`。
+
+SDK 版建议模块：
+
+```text
+study_area/feishu/pi-feishu-bridge-sdk/
+  README.md
+  package.json
+  tsconfig.json
+  .env.example
+  .gitignore
+
+  src/
+    main.ts                 程序入口
+    config.ts               读取环境变量
+
+    feishu/
+      channel.ts            创建和配置 LarkChannel
+      events.ts             接收归一化事件、校验、入队
+      messenger.ts          封装 channel.send() / channel.stream()
+
+    pi/
+      session.ts            创建 AgentSession
+      session-registry.ts   按 session key 管理 AgentSession
+      events.ts             聚合 pi 事件和 assistant 文本
+
+    app/
+      bridge.ts             队列消费和核心流程
+      commands.ts           /help /new /abort /status
+      task-queue.ts         按会话串行执行任务
+```
+
+SDK 版第一步只做：
+
+1. 使用 `createAgentSession()` 创建一个全局 `AgentSession`。
+2. 使用 `SessionManager.create(PI_WORKDIR, PI_SESSION_DIR)` 持久化会话。
+3. 订阅 `message_update`，拼接 `text_delta`。
+4. 调用 `session.prompt("只回复 OK")`。
+5. 在 `agent_end` 后打印最终文本并调用 `session.dispose()`。
+
+第一步先不接飞书。跑通后，再增加飞书长连接和消息队列。
+
+多用户版本再增加：
+
+```text
+session key = tenant_key + chat_id + user_id
+```
+
+每个 `session key` 对应一个 session holder。holder 至少保存：
+
+```text
+AgentSession
+SessionManager
+unsubscribe
+task queue
+last active time
+```
+
+命令映射：
+
+```text
+/help      bridge 直接返回帮助文本
+/status    读取 session.isStreaming 和队列长度
+/abort     调用 session.abort()
+/new       创建新的 AgentSession，并重新绑定事件订阅
+/compact   调用 session.compact()
+```
+
+如果后续需要恢复历史会话、切换会话或 fork，再引入 `AgentSessionRuntime`。第一版不要提前增加这层复杂度。
+
+SDK 版详细设计和分阶段验收标准见：
+
+```text
+study_area/feishu/pi-feishu-bridge-sdk/README.md
+```
+
 ## 6. 第一阶段：CLI 最小可用原型
 
 状态：已完成，目录为：
@@ -571,9 +692,11 @@ study_area/feishu/pi-feishu-bridge-cli/
 - 先不处理附件。
 - 先不让 pi 修改敏感目录。
 
-## 7. 第二阶段：RPC、session 和命令
+## 7. 第二阶段：SDK / RPC、session 和命令
 
-目标：用 RPC 版替代 CLI 版，让飞书会话能逐步对应 pi 会话。
+目标：用 SDK 版或 RPC 版替代 CLI 版，让飞书会话能逐步对应 pi 会话。
+
+推荐优先继续 SDK 版。原因是 bridge、飞书官方 SDK 和 pi SDK 都可以使用 TypeScript，调用链更短，也更方便直接管理 session 和事件。RPC 版保留，适合验证 JSONL 协议，或未来给 Python 等非 Node.js 程序复用。
 
 设计：
 
@@ -681,7 +804,8 @@ pi tool → child_process 调 lark-cli → 解析 JSON/stdout → 返回给 pi
 
 - 校验飞书事件签名/token。
 - 限制允许访问的飞书用户或群。
-- bridge 只监听 localhost，公网通过 tunnel 转发。
+- 长连接模式不开放本地监听端口。
+- 如果后续迁移到 webhook，bridge 只监听受控地址，公网入口通过 HTTPS tunnel 或反向代理转发。
 - pi 工作目录使用专门目录，不要默认指向整个 home。
 - 对危险命令加人工确认或禁用。
 - 不把 `APP_SECRET`、飞书 token、pi auth 写入日志。
@@ -729,16 +853,19 @@ pi tool → child_process 调 lark-cli → 解析 JSON/stdout → 返回给 pi
 4. 跑通发送文本回复
 5. bridge 调本地 pi CLI
 6. 飞书消息 → pi → 飞书回复
-7. 增加 session 映射
-8. 增加命令系统
-9. 调研 pi SDK/RPC，替换 CLI 调用
-10. 增加 Feishu CLI/OpenAPI tools
-11. 加权限、安全和日志
+7. 跑通 pi SDK 最小验证：`createAgentSession()` → `prompt()` → 收集事件
+8. 跑通飞书 Node SDK `createLarkChannel()` 固定回复
+9. 用 SDK bridge 替换 CLI 调用；RPC 版保留为跨语言备选
+10. 增加 session 映射
+11. 增加命令系统
+12. 增加 Feishu CLI/OpenAPI tools
+13. 加权限、安全和日志
 ```
 
 ## 13. 关键待调研问题
 
-- Node.js bridge 是直接用 `AgentSession`，还是先用 RPC 子进程。
+- SDK 版从单个全局 `AgentSession` 演进为多 session registry 时，空闲 session 的释放策略。
+- SDK 版何时需要从直接使用 `AgentSession` 升级到 `AgentSessionRuntime`。
 - RPC 进程和飞书会话的映射策略：全局一个、每个 chat 一个、还是每个 user 一个。
 - RPC `--session-dir` 是否按飞书会话隔离。
 - extension UI request 如何映射到飞书消息卡片或普通文本确认。
@@ -754,6 +881,10 @@ pi tool → child_process 调 lark-cli → 解析 JSON/stdout → 返回给 pi
 - 接收消息事件为 `im.message.receive_v1`。
 - 回复消息 API 为 `POST /open-apis/im/v1/messages/:message_id/reply`。
 - 发送消息 API 为 `POST /open-apis/im/v1/messages`。
+- 飞书官方 Node SDK 包名为 `@larksuiteoapi/node-sdk`，支持 TypeScript。
+- 飞书官方 Node SDK 可以使用 `WSClient` 和 `EventDispatcher` 建立长连接并订阅 `im.message.receive_v1`。
+- 飞书官方 Node SDK 的高层 `Channel` 模块适合 AI 对话机器人，封装了传输、消息归一化、安全策略、发送、流式回复、媒体上传和卡片交互。
+- 飞书官方 Node SDK 文档说明：长连接事件处理需要在 3 秒内完成，否则会触发超时重推。
 - 飞书官方文档建议本地开发用 `ngrok` 或 `localtunnel` 暴露 webhook。
 - 官方 Lark/Feishu CLI 存在，npm 包是 `@larksuite/cli`，命令是 `lark-cli`。
 - 官方 CLI 快速安装命令是 `npx @larksuite/cli@latest install`。
@@ -763,6 +894,8 @@ pi tool → child_process 调 lark-cli → 解析 JSON/stdout → 返回给 pi
 参考链接：
 
 - https://open.feishu.cn/document/historical-version/interactive-session-based-robot/introduction?lang=zh-CN
+- https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/request-url-configuration-case?lang=zh-CN
+- https://github.com/larksuite/node-sdk
 - https://open.feishu.cn/document/no_class/mcp-archive/feishu-cli-installation-guide
 - https://open.larkoffice.com/document/mcp_open_tools/feishu-cli-let-ai-actually-do-your-work-in-feishu.md
 - https://github.com/larksuite/cli
